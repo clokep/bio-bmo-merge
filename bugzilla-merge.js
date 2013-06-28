@@ -1,8 +1,15 @@
+var fs = require("fs");
 var bz = require("bz");
 var async = require("async");
 
 var source = bz.createClient({
-  //url: "https://api-dev.source.mozilla.org/instantbird/",
+  url: "https://api-dev.bugzilla.mozilla.org/instantbird/",
+  username: "",
+  password: "",
+  timeout: 300000
+});
+
+var target = bz.createClient({
   //url: "https://api-dev.source.mozilla.org/test/latest/",
   test: true,
   username: "",
@@ -10,61 +17,113 @@ var source = bz.createClient({
   timeout: 30000
 });
 
-var bugMap = {};
+// Source bug ID to target bug ID.
+var bugIdMap = {};
+// Source attachment ID to target attachment ID.
+var attachmentIdMap = {};
+// Source user IDs to target user IDs.
+var userIdMap = {};
 
 //var startDate = "1970-01-01";
 var startDate = "2013-05-23";
+//var searchParams = [["changed_after", startDate]];
+var searchParams = [["id", "100,20,300,400,5,600,700,80,90,1000"]];
+//var searchParams = [["id", "1"]];
+
 async.waterfall([
     // First get the basic information for each bug.
     function(aCallback) {
-      source.searchBugs([["changed_after", startDate]], function(aError, aBugs) {
+      source.searchBugs(searchParams, function(aError, aBugs) {
         if (!aError) {
           // XXX for speed.
-          aBugs = aBugs.slice(0, 10);
+          //aBugs = aBugs.slice(0, 10);
 
           console.log("Received information on " + aBugs.length + " bugs!");
-
-          // Sort the bugs by ID.
-          aBugs.sort(function(a, b) {
-            return a.id - b.id;
-          });
-
-          var nextId = 0;
-
-          // Then, create a new bug in the target for each bug.
-          var newBugs = async.mapSeries(aBugs, function(aBug, aCallback) {
-            var id = nextId++;
-            console.log("Creating bug " + aBug.id + " -> " + id);
-            // XXX need to "transform" the bug to fix bug links.
-            /*target.createBug(transformBug(aBug, bugMap), function(aError, aId) {
-              if (!aError) {
-                aCallback(null, aId);
-              }
-              else
-                aCallback(aError);
-            }*/
-            bugMap[aBug.id] = id;
-            aBug.old_id = aBug.id;
-            aBug.id = id;
-            aCallback(null, aBug);
-          }, function(aError, aBugs) {
-            console.log("All bugs created!");
-            aCallback(aError, aBugs);
-          });
+          aCallback(null, aBugs);
         }
         else
           aCallback(aError);
       })
     },
+
+    function(aBugs, aCallback) {
+      saveToFile(aBugs, "bugs.json", aCallback);
+    },
+
+    // Then load the full bug for each one.
+    function(aBugs, aCallback) {
+      async.map(aBugs, function(aBug, aBzCallback) {
+        source.getBug(aBug.id, [["include_fields", "_all"]], function(aError, aBug) {
+          console.log("Loaded bug " + aBug.id + "!");
+          aBzCallback(aError, aBug);
+        });
+      }, aCallback);
+    },
+
+    function(aBugs, aCallback) {
+      saveToFile(aBugs, "bugs-full.json", aCallback);
+    },
+
+    // Load the attachments for each bug.
+    function(aBugs, aCallback) {
+      async.map(aBugs, function(aBug, aBzCallback) {
+        source.bugAttachments(aBug.id, function(aError, aAttachments) {
+          console.log("Loaded attachments from bug " + aBug.id + "!");
+          aBug.attachments = aAttachments;
+          aBzCallback(aError, aBug);
+        })
+      }, aCallback);
+    },
+
+    function(aBugs, aCallback) {
+      saveToFile(aBugs, "attachments.json", aCallback);
+    },
+
+    // Shit.
+    function(aBugs, aCallback) {
+      // Sort the bugs by ID.
+      aBugs.sort(function(a, b) {
+        return a.id - b.id;
+      });
+
+      var nextId = 0;
+
+      // Then, create a new bug in the target for each bug.
+      var newBugs = async.mapSeries(aBugs, function(aBug, aCallback) {
+        var id = nextId++;
+        console.log("Creating bug " + aBug.id + " -> " + id);
+        // "Transform" the bug to fix bug links and references.
+        aBug =  transformBug(aBug);
+        // Because the API doesn't allow attachments to be added when
+        // creating bugs, ensure we add the comment after.
+
+        /*target.createBug(transformBug(aBug, bugIdMap), function(aError, aId) {
+          if (hasAttachment) {
+            // Attach
+          }
+          else if (!aError)
+            aCallback(null, aId);
+          else
+            aCallback(aError);
+        }*/
+        bugIdMap[aBug.id] = id;
+        aBug.old_id = aBug.id;
+        aBug.id = id;
+        aCallback(null, aBug);
+      }, function(aError, aBugs) {
+        console.log("All bugs created!");
+        aCallback(aError, aBugs);
+      });
+    },
+
     // Now we can append to the bugs in any order!
     function(aBugs, aCallback) {
       // Assume that
-      console.log(aBugs);
-      aCallback(null);
+
     },
     // Now append the CC information at the end (so that users don't get CC'd on
     // every change above).
-    function(aBugs, aCallback) {
+    function(aCallback) {
       aCallback(null);
     }
   ], function (aError, aResult) {
@@ -93,6 +152,7 @@ function mapProductAndComponent(aProduct, aComponent) {
 }
 
 const bugPattern = /(bug\s#?|show_bug\.cgi\?id=)(\d+)/gi;
+const attachmentPattern = /(attachment\s#?)(\d+)/gi;
 const sourceUrlPattern = /bugzilla\.instantbird\.(?:org|com)/gi;
 /*
  * Fix up the fields of a bug to account for changed bug information. This
@@ -106,23 +166,32 @@ const sourceUrlPattern = /bugzilla\.instantbird\.(?:org|com)/gi;
  */
 function transformBug(aBug) {
   function replaceBugNumber(aMatch, aBugStr, aBugNum) {
-    let bugNum = aBugNum;
-    if (bugMap.hasOwnProperty(aBugNum))
-      bugNum = bugMap[aBugNum];
-    return aBugStr + bugNum;
+    return aBugStr + (bugIdMap.hasOwnProperty(aBugNum) ? bugIdMap[aBugNum] : aBugNum);
   }
+
+  function replaceAttachmentNumber(aMatch, aAttachStr, aAttachNum) {
+    return aAttachStr +
+      (attachmentIdMap.hasOwnProperty(aAttachNum) ? attachmentIdMap[aAttachNum] : aAttachNum);
+  }
+
   // Replace bug links in the summary and comments.
   // Additionally, replace any mention of BIO with BMO.
   aBug.summary = aBug.summary.replace(bugPattern, replaceBugNumber)
+                             .replace(attachmentPattern, replaceAttachmentNumber)
                              .replace(sourceUrlPattern, "bugzilla.mozilla.org");
-  aBug.comment = aBug.comment.map(function(aComment) {
-    aComment.text = aComment.text.replace(bugPattern, replaceBugNumber)
-                                 .replace(sourceUrlPattern, "bugzilla.mozilla.org");
-    return aComment;
-  });
+  if (aBug.comment) {
+    aBug.comment = aBug.comment.map(function(aComment) {
+      aComment.text = aComment.text.replace(bugPattern, replaceBugNumber)
+                                   .replace(attachmentPattern, replaceAttachmentNumber)
+                                   .replace(sourceUrlPattern, "bugzilla.mozilla.org");
+      return aComment;
+    });
+  }
 
   // Fix the product and component.
-  [aBug.product, aBug.component] = mapProductAndComponent(aBug.product, aBug.component);
+  var pair = mapProductAndComponent(aBug.product, aBug.component);
+  aBug.product = pair[0];
+  aBug.component = pair[1];
 
   return aBug;
 }
@@ -138,4 +207,15 @@ function transformBug(aBug) {
  */
 function stripBug(aBug) {
   return aBug;
+}
+
+function saveToFile(aObject, aFilename, aCallback) {
+  fs.appendFile(aFilename, JSON.stringify(aObject, null, 4), function(aErr) {
+    if (aErr)
+      aCallback(aErr);
+    else {
+      console.log(aFilename + " was saved!");
+      aCallback(null, aObject);
+    }
+  });
 }
