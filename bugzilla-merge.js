@@ -35,9 +35,6 @@ async.waterfall([
     function(aCallback) {
       source.searchBugs(searchParams, function(aError, aBugs) {
         if (!aError) {
-          // XXX for speed.
-          //aBugs = aBugs.slice(0, 10);
-
           console.log("Received information on " + aBugs.length + " bugs!");
           aCallback(null, aBugs);
         }
@@ -47,11 +44,14 @@ async.waterfall([
     },
 
     function(aBugs, aCallback) {
+      // XXX for speed.
+      aBugs = aBugs.slice(0, 10);
       saveToFile(aBugs, "bugs.json", aCallback);
     },
 
     // Then load the full bug for each one.
     function(aBugs, aCallback) {
+      aBugs = aBugs.slice(1, 10);
       async.map(aBugs, function(aBug, aBzCallback) {
         source.getBug(aBug.id, [["include_fields", "_all"]], function(aError, aBug) {
           console.log("Loaded bug " + aBug.id + "!");
@@ -79,7 +79,7 @@ async.waterfall([
       saveToFile(aBugs, "attachments.json", aCallback);
     },
 
-    // Shit.
+    // Start creating the bugs.
     function(aBugs, aCallback) {
       // Sort the bugs by ID.
       aBugs.sort(function(a, b) {
@@ -116,11 +116,16 @@ async.waterfall([
       });
     },
 
+    function(aBugs, aCallback) {
+      saveToFile(aBugs, "transformed.json", aCallback);
+    },
+
     // Now we can append to the bugs in any order!
     function(aBugs, aCallback) {
       // Assume that
 
     },
+
     // Now append the CC information at the end (so that users don't get CC'd on
     // every change above).
     function(aCallback) {
@@ -218,4 +223,8 @@ function saveToFile(aObject, aFilename, aCallback) {
       aCallback(null, aObject);
     }
   });
+}
+
+function downloadAttachment(bzRef, id, callback) {
+  bzRef.APIRequest('/bug/' + id + '/attachment?attachmentdata=1', 'GET', callback);
 }
