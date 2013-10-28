@@ -1,19 +1,74 @@
+/*
+ * This requires two 3rd party node.js libraries:
+ *  npm install async
+ *  npm install bz
+ *
+ * See documentation at:
+ *  https://github.com/harthur/bz.js
+ *  https://github.com/caolan/async
+ *
+ * Create credentials.json which contains:
+ * {source: ["user", "password"],
+ *  target: ["user", "password"]}
+ *
+ * Run this as:
+ *  node bugzilla-merge.js
+ *
+ * The conceptual algorithm this is trying to follow is:
+ *  1.  Find all bugs on source.
+ *  2.  Load each bug from source.
+ *  3.  Load each attachment from source.
+ *  4.  Create each bug on target.
+ *  4a. "Transform" the bug.
+ *  4b. If the initial comment had an attachment, add it as a second comment.
+ *  5.  Append the extra comments and attachments to each bug.
+ *  5a. "Transform" bug.
+ *  6.  Update the CC list to the original list.
+ *
+ * Transforming the bug means updating links / bug numbers, Products and
+ * Components to point to data on target.
+ *
+ * After each of these steps we save a file out to "keep" our progress.
+ *
+ * TODO:
+ *  Attachments are not done at all.
+ *  The transform function needs to be finished.
+ *  Creating bugs has not been tested.
+ */
+
 var fs = require("fs");
 var bz = require("bz");
 var async = require("async");
 
+var sourceCredentials = {};
+var targetCredentials = {};
+
+/*
+ * Load user supplied credentials if they exist.
+ */
+fs.existsSync('credentials.json', function(aExists) {
+  fs.readFileSync('credentials.json', function(aErr, aData) {
+    if (aErr)
+      throw aErr;
+
+    var data = JSON.parse(aData);
+    sourceCredentials = data.source;
+    targetCredentials = data.target;
+  })
+});
+
 var source = bz.createClient({
   url: "https://api-dev.bugzilla.mozilla.org/instantbird/",
-  username: "",
-  password: "",
+  username: sourceCredentials[0],
+  password: sourceCredentials[1],
   timeout: 300000
 });
 
 var target = bz.createClient({
   //url: "https://api-dev.source.mozilla.org/test/latest/",
   test: true,
-  username: "",
-  password: "",
+  username: targetCredentials[0],
+  password: targetCredentials[1],
   timeout: 30000
 });
 
@@ -24,6 +79,7 @@ var attachmentIdMap = {};
 // Source user IDs to target user IDs.
 var userIdMap = {};
 
+// TODO These are set right now to only search for a few bugs to ease testing.
 //var startDate = "1970-01-01";
 var startDate = "2013-05-23";
 //var searchParams = [["changed_after", startDate]];
@@ -95,7 +151,7 @@ async.waterfall([
         // "Transform" the bug to fix bug links and references.
         aBug =  transformBug(aBug);
         // Because the API doesn't allow attachments to be added when
-        // creating bugs, ensure we add the comment after.
+        // creating bugs, ensure we add it after.
 
         /*target.createBug(transformBug(aBug, bugIdMap), function(aError, aId) {
           if (hasAttachment) {
@@ -123,7 +179,7 @@ async.waterfall([
     // Now we can append to the bugs in any order!
     function(aBugs, aCallback) {
       // Assume that
-
+      // TODO
     },
 
     // Now append the CC information at the end (so that users don't get CC'd on
