@@ -337,7 +337,3 @@ function saveToFile(aObject, aFilename, aCallback) {
     }
   });
 }
-
-function downloadAttachment(bzRef, id, callback) {
-  bzRef.APIRequest('/bug/' + id + '/attachment?attachmentdata=1', 'GET', callback);
-}
