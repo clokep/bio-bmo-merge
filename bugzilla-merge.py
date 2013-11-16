@@ -31,7 +31,8 @@ def mapFields(bug):
     elif (bug.product == "Websites"):
         bug.product = "Instantbird Servers"
     else:
-        raise "Unable to map product: %s" % bug.product;
+        print "Unable to map product: %s" % bug.product
+        raise Exception("Unable to map product", bug.product)
 
     # BIO separate PC and Mac, BMO has both as x86.
     if (bug.platform == "PC" or bug.platform == "Mac"):
@@ -67,6 +68,7 @@ def mapIds(text):
 
 # We can use "None" for both instead to not authenticate
 username, password = get_credentials()
+username2, password2 = get_credentials("bmo")
 
 # If you're stupid and type in the wrong password...
 #import keyring
@@ -78,17 +80,17 @@ bio = BugzillaAgent("https://api-dev.bugzilla.mozilla.org/instantbird/",
 bioUrl = "https://bugzilla.instantbird.org"
 #bmo = BMOAgent(username, password)
 bmo = CommentAgent("https://api-dev.bugzilla.mozilla.org/test/latest/",
-                   username, password)
+                   username2, password2)
 
 # Set whatever REST API options we want
 options = {
-    'changed_after':    '2013-01-12',
+    'changed_after':    '2013-11-12',
     #'include_fields':   '_default,attachments',
     'include_fields':   '_all',
 }
 
 # Get the bugs from the source.
-bugs = bmo.get_bug_list(options)
+bugs = bio.get_bug_list(options)
 
 print "Found %s bugs" % (len(bugs))
 
@@ -115,17 +117,26 @@ for bug in bugs:
         urllib.urlretrieve(url, path.join(attachmentsDir, str(attachment.id)))
 
 # Create new bugs from the first comment + add an attachment if there is one.
+print "Creating bugs..."
 for bug in bugs:
     # First update the fields.
     mapFields(bug)
+    print "Adding bug %d" % bug.id
     bug.summary = mapIds(bug.summary)
-    #bmo.create_bug(bug)
+    #ref = bmo.create_bug(bug)
+    # Get the new ID from the reference.
+    #bugIdMap[bug.id] = ref.rsplit("/", 1)[1]
+    bugIdMap[bug.id] = bug.id * 10
 
 # Sort the comments / attachments by date.
-comments = [comment for bug in bugs for comment in bug.comments]
-comments.sort(key=lambda comment: comment.creation_time)
+comments = [[bug.id, comment] for bug in bugs for comment in bug.comments]
+comments.sort(key=lambda comment: comment[1].creation_time)
 
-print len(comments)
 # Now add all other comments / attachments.
+for comment in comments:
+    text = mapId(comment[1].text)
+    print "Adding comment to bug %d - %s" %(comment[0], text)
+    #bmo.add_comment(comment[0], text)
 
-# Now add dependencies.
+# Now add dependencies, CC list.
+
