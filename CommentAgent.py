@@ -20,3 +20,6 @@ class CommentAgent(AttachmentAgent):
 
     def add_comment(self, bug_id, comment):
         self._comment(bug_id, comment)
+
+    def add_attachment(self, bug_id, attachment):
+        pass

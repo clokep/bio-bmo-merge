@@ -121,22 +121,35 @@ print "Creating bugs..."
 for bug in bugs:
     # First update the fields.
     mapFields(bug)
-    print "Adding bug %d" % bug.id
     bug.summary = mapIds(bug.summary)
     #ref = bmo.create_bug(bug)
     # Get the new ID from the reference.
-    #bugIdMap[bug.id] = ref.rsplit("/", 1)[1]
-    bugIdMap[bug.id] = bug.id * 10
+    #newId = ref.rsplit("/", 1)[1]
+    newId = bug.id * 10
+    print "Added bug %d as %d" %(bug.id, newId)
+    bugIdMap[bug.id] = newId
+
+# Sort the attachments by date.
+attachments = [[bug.id, attachment] for bug in bugs for attachment in bug.attachments]
+attachments.sort(key=lambda attachment: attachment[1].creation_time)
+
+# Add all the attachments.
+for attachment in attachments:
+    #text = mapIds(comment[1].text)
+    #print "Adding attachment %d - %s" %(attachment[0], text)
+    #bmo.add_attachment(attachment[0], attachment[1])
+    pass
 
 # Sort the comments / attachments by date.
 comments = [[bug.id, comment] for bug in bugs for comment in bug.comments]
 comments.sort(key=lambda comment: comment[1].creation_time)
 
-# Now add all other comments / attachments.
+# Add all the comments.
 for comment in comments:
-    text = mapId(comment[1].text)
+    text = mapIds(comment[1].text)
     print "Adding comment to bug %d - %s" %(comment[0], text)
     #bmo.add_comment(comment[0], text)
 
 # Now add dependencies, CC list.
-
+for bug in bugs:
+    pass
