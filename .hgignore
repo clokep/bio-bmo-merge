@@ -5,3 +5,4 @@ transformed.json
 bugs.json
 attachments.json
 bugs-full.json
+*.pyc
